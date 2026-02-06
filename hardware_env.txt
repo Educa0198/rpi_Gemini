@@ -1,0 +1,29 @@
+# HW
+Raspberry Pi 3 Model B Rev 1.2
+
+# Smartphones
+Galaxy A51
+
+# HW New
+Raspberry Pi Pico 2 W
+Raspberry Pi ZERO 2 W
+
+
+
+# Environment:
+uname -a
+Linux rpi3-rpos-d11 6.1.21-v8+ #1642 SMP PREEMPT Mon Apr  3 17:24:16 BST 2023 aarch64 GNU/Linux
+
+
+# MAC A51:
+  Wifi 48:51:69:70:E2:12
+  Blue 48:51:69:70:E2:11
+
+# MAC G S20 FE:
+  Wifi 2C:15:BF:4B:CB:09
+  Blue 2C:15:BF:4B:CB:08
+
+
+
+
+

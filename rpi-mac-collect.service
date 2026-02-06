@@ -1,0 +1,20 @@
+[Unit]
+Description=Wifi MAC Collect TCP Server
+
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/app/rpi/code
+ExecStart=/app/rpi/code/rpi-mac-collect.sh
+# ExecStart=python ./mac_tcp.py > mac-wifi.log
+
+SyslogIdentifier=RpiMacCollectService
+RestartSec=5
+User=rpi
+Group=bluetooth
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

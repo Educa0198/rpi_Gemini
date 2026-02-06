@@ -1,0 +1,5 @@
+
+scapy==2.6.1
+python-decouple==3.8
+RPi.GPIO
+pyserial
