@@ -5,8 +5,10 @@ echo "RPI MAC Collect script started at $dt"
 # source ./.venv/bin/activate;
 pip3 install -r requirements.txt
 sleep 1;
-sudo python ./mac_tcp.py > mac-wifi.log
+
+sudo python ./mac_otg.py > mac-wifi.log
 # nohup python mac_bluetooth.py >> mac-wifi.log &
+
 sleep 2;
 # echo "RPI mac script finished successfully. Check mac-wifi.log file for details."
 dt=$(date '+%Y-%m-%dT%H:%M:%S');
