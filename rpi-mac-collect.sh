@@ -6,6 +6,10 @@ echo "RPI MAC Collect script started at $dt"
 pip3 install -r requirements.txt
 sleep 1;
 
+sudo rfkill unblock bluetooth
+sudo systemctl start bluetooth
+sleep 2;
+
 sudo python ./mac_otg.py > mac-wifi.log
 # nohup python mac_bluetooth.py >> mac-wifi.log &
 

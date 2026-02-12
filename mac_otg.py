@@ -5,6 +5,7 @@ import csv
 import logging
 import atexit
 import serial
+from bluepy.btle import Scanner, DefaultDelegate
 from decouple import config
 
 # Scapy imports
@@ -23,6 +24,7 @@ log_level = config('LOG_LEVEL', default='INFO')
 led = None
 usb_serial = None  # Objeto da conexão serial
 usb_connected = False
+serial_lock = threading.Lock() # Controlador de envio entre mac e bluetooth
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 CSV_DIR_NAME = 'macs_csv'
@@ -110,37 +112,56 @@ def serial_maintainer():
 def PacketHandler(pkt):
     global usb_serial, usb_connected, led
 
+    # Ensure packet has WiFi layer (Dot11) and is a Management frame (type 0)
+    # subtype 4 is 'Probe Request' (devices looking for wifi)
     if pkt.haslayer(Dot11) and pkt.type == 0 and pkt.subtype == 0x04:
         try:
+            # 1. Get MAC Address (Source Address)
             mac = pkt.addr2
-            rssi = -100
-            noise = -95
-
+            
+            # 2. Extract Signal Info safely
+            rssi = -100   # Default weak value
+            noise = -95   # Default noise floor
+            
             if pkt.haslayer(RadioTap):
                 rt = pkt[RadioTap]
-                rssi = getattr(rt, 'dbm_antsignal', rssi)
-                noise = getattr(rt, 'dbm_antnoise', noise)
+                
+                # Check if the field exists before accessing
+                # (Some drivers strip these fields)
+                if hasattr(rt, 'dbm_antsignal') and rt.dbm_antsignal is not None:
+                    rssi = int(rt.dbm_antsignal)
+                
+                if hasattr(rt, 'dbm_antnoise') and rt.dbm_antnoise is not None:
+                    noise = int(rt.dbm_antnoise)
+                else:
+                    pass 
 
-            if rssi >= 0: rssi = -100
-            snr = int(rssi - noise)
+           
+            # SNR = Signal - Noise
+            
+            snr = rssi - noise
+            
+            # Sanity check: If RSSI is still default, the packet might be malformed
+            if rssi == -100:
+                return 
+
             timestamp = getFormattedTimestamp("%Y-%m-%d %H:%M:%S")
-
+            
             # 1. Salva no CSV sempre (Backup)
             with open(session_mac_log_path, "a", newline='') as f:
                 csv.writer(f).writerow([mac, rssi, snr, timestamp])
 
             # 2. Envia via Serial (Se conectado)
-            if usb_connected and usb_serial and usb_serial.is_open:
-                msg = f"{mac},{rssi},{snr},{timestamp}#"
-                try:
-                    usb_serial.write((msg + "\n").encode())
-                    # Feedback Visual: Verde Sólido (Enviando)
-                    led.set_state(LEDState.SENDING_MACS)
-                except Exception as e:
-                    log_error(f"Erro de envio: {e}")
-                    # Força reconexão na thread maintainer
-                    usb_serial.close()
-                    usb_connected = False
+            with serial_lock:
+                if usb_connected and usb_serial and usb_serial.is_open:
+                    msg = f"{mac},{rssi},{snr},{timestamp}#"
+                    try:
+                        usb_serial.write((msg + "\n").encode())
+                        led.set_state(LEDState.SENDING_MACS)
+                    except Exception as e:
+                        log_error(f"Erro de envio: {e}")
+                        usb_serial.close()
+                        usb_connected = False
 
         except Exception as e:
             log_error(f"Erro no handler: {e}")
@@ -163,6 +184,51 @@ def activity_watcher():
         # Como o LEDManager é simples, vamos deixar o PacketHandler controlar o pulso.
         pass
 
+def bluetooth_scanner():
+    global usb_serial, usb_connected, led
+    
+    log_info("Iniciando Scanner BLE (Modo Passivo)...")
+    
+    # O Scanner do bluepy precisa de permissão root (sudo)
+    scanner = Scanner()
+    
+    while True:
+        try:
+            # Escaneia por 4 segundos. 
+            # Isso bloqueia a thread por 4s, coletando todos os "beacons" ao redor.
+            devices = scanner.scan(4.0)
+            
+            timestamp = getFormattedTimestamp("%Y-%m-%d %H:%M:%S")
+            
+            for dev in devices:
+                mac = dev.addr
+                rssi = dev.rssi
+                
+                
+                # --- ZONA CRÍTICA: ENVIO SERIAL ---
+                with serial_lock: 
+                    # 1. Salva no CSV
+                    with open(session_mac_log_path, "a", newline='') as f:
+                        # Adicionamos o prefixo BLE para diferenciar do WiFi
+                        csv.writer(f).writerow([f"BLE-{mac}", rssi, timestamp])
+
+                    # 2. Envia para o Android via USB
+                    if usb_connected and usb_serial and usb_serial.is_open:
+                        # Formato: BLE:mac,rssi,snr,timestamp#
+                        msg = f"BLE:{mac},{rssi},{timestamp}#"
+                        try:
+                            usb_serial.write((msg + "\n").encode())
+                            led.set_state(LEDState.SENDING_MACS)
+                        except Exception as e:
+                            log_error(f"Erro envio BLE: {e}")
+                # ----------------------------------
+                
+        except Exception as e:
+            # Às vezes o hardware de bluetooth reseta ou falha.
+            # Esperamos um pouco e tentamos de novo.
+            log_error(f"Erro no scan BLE: {e}")
+            time.sleep(2)
+
 # ==================== MAIN ====================
 def main():
     global led
@@ -183,6 +249,9 @@ def main():
 
     # Inicia thread que cuida da conexão serial
     threading.Thread(target=serial_maintainer, daemon=True).start()
+
+    # Inicia thread do Bluetooth 
+    threading.Thread(target=bluetooth_scanner, daemon=True).start()
 
     log_info("Iniciando Sniffer (Tempo Real)...")
     sniff(iface=iface_mon, prn=PacketHandler, store=0)
